@@ -6,180 +6,126 @@ import pandas as pd
 import pickle
 import numpy as np
 from scipy.spatial.distance import cosine
-import time
+import datetime
 
 # --- 1. PAGE CONFIGURATION ---
-st.set_page_config(
-    page_title="AI Fashion Personalization | Master Thesis",
-    page_icon="👗",
-    layout="wide"
-)
+st.set_page_config(page_title="Fashion AI Recommender | Research Prototype", layout="wide")
 
-# Professional CSS Styling
+# Modern Styling
 st.markdown("""
     <style>
-    .main { background-color: #f8f9fa; }
-    .stButton>button {
-        width: 100%;
-        border-radius: 20px;
-        border: 1px solid #1f1f1f;
-        background-color: white;
-        color: #1f1f1f;
-        transition: 0.3s;
+    .product-card {
+        border: 1px solid #eee; padding: 10px; border-radius: 10px;
+        background-color: white; text-align: center; height: 450px;
     }
-    .stButton>button:hover {
-        background-color: #1f1f1f;
-        color: white;
-    }
-    .product-box {
-        border: 1px solid #eee;
-        padding: 15px;
-        border-radius: 10px;
-        background-color: white;
-        text-align: center;
-        margin-bottom: 20px;
-    }
+    .stButton>button { width: 100%; border-radius: 5px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA DEPLOYMENT (GOOGLE DRIVE) ---
+# --- 2. CLOUD DATA DEPLOYMENT ---
 @st.cache_resource
-def initialize_deployment():
-    # File IDs from your provided Google Drive links
+def initialize_system():
     files = {
         'final_product_metadata.csv': '1eNr_tNE5bRgJEEYhRPxMl4aXwlOleC00',
         'visual_features.pkl': '1u--yRrnWaqmfOke6xQtxXAThXXBP2MYg',
         'images.zip': '1mbrnVwgk5Xyrjg2tSoSbnbJqk2oinmX-'
     }
-    
     for filename, f_id in files.items():
         if not os.path.exists(filename):
-            with st.spinner(f'Downloading {filename} from Research Server...'):
-                url = f'https://drive.google.com/uc?id={f_id}'
-                gdown.download(url, filename, quiet=False)
+            url = f'https://drive.google.com/uc?id={f_id}'
+            gdown.download(url, filename, quiet=False)
     
     if not os.path.exists('images'):
-        with st.spinner('Extracting Visual Dataset (14,200 images)...'):
-            with zipfile.ZipFile('images.zip', 'r') as zip_ref:
-                zip_ref.extractall('.')
-            st.success('Environment Ready!')
+        with zipfile.ZipFile('images.zip', 'r') as zip_ref:
+            zip_ref.extractall('.')
 
-initialize_deployment()
+initialize_system()
 
-# --- 3. LOAD DATASETS ---
+# --- 3. DATA LOADING ---
 @st.cache_data
-def load_datasets():
-    # Load Metadata
+def load_research_data():
     df = pd.read_csv('final_product_metadata.csv')
     df['p_id'] = df['p_id'].astype(str)
-    # Combine text for Search Engine (Stage 1 of Workflow)
-    df['search_content'] = (df['products'].fillna('') + " " + 
-                            df['brand'].fillna('') + " " + 
-                            df['description'].fillna('')).str.lower()
-    
-    # Load Visual Features (Stage 4 of Workflow)
+    df['search_meta'] = (df['products'].fillna('') + " " + df['brand'].fillna('') + " " + df['description'].fillna('')).str.lower()
     with open('visual_features.pkl', 'rb') as f:
         features = pickle.load(f)
-    features = {str(k): v for k, v in features.items()}
+    return df, {str(k): v for k, v in features.items()}
+
+df, features_db = load_research_data()
+
+# --- 4. SESSION STATE & TRACKING ---
+if 'user_id' not in st.session_state: st.session_state.user_id = datetime.datetime.now().strftime("%H%M%S")
+if 'history' not in st.session_state: st.session_state.history = []
+if 'selected_product' not in st.session_state: st.session_state.selected_product = None
+
+def log_interaction(p_id, action):
+    log_entry = pd.DataFrame([{
+        "user_id": st.session_state.user_id,
+        "timestamp": datetime.datetime.now().isoformat(),
+        "p_id": p_id,
+        "action": action
+    }])
+    log_entry.to_csv('interaction_logs.csv', mode='a', header=not os.path.exists('interaction_logs.csv'), index=False)
+
+# --- 5. VISUAL RE-RANKING LOGIC ---
+def get_recommendations(candidates):
+    if not st.session_state.history: return candidates.head(16)
+    user_vectors = [features_db[p] for p in st.session_state.history if p in features_db]
+    if not user_vectors: return candidates.head(16)
     
-    return df, features
-
-df, features_db = load_datasets()
-
-# --- 4. SESSION STATE & BI TRACKING ---
-if 'history' not in st.session_state:
-    st.session_state.history = [] # Tracks clicked p_ids
-if 'clicks' not in st.session_state:
-    st.session_state.clicks = 0
-
-# --- 5. SIDEBAR: BI ANALYTICS DASHBOARD ---
-with st.sidebar:
-    st.title("📊 BI Dashboard")
-    st.markdown("---")
-    st.metric(label="Total Interactions", value=st.session_state.clicks)
-    st.metric(label="Profile Depth", value=f"{len(st.session_state.history)} items")
-    
-    st.markdown("### Visual Profile Status")
-    if len(st.session_state.history) > 0:
-        st.success("Visual Preference Model Active")
-    else:
-        st.warning("Awaiting User Interaction")
-        
-    if st.button("Reset User Profile"):
-        st.session_state.history = []
-        st.session_state.clicks = 0
-        st.rerun()
-
-# --- 6. MAIN INTERFACE ---
-st.title("Personalized Fashion Recommender")
-st.markdown("*A Deep Learning Framework for Enhancing Retail Business Intelligence*")
-
-# Stage 1: Search Engine (Content-Based)
-query = st.text_input("🔍 Search for products (e.g., 'Blue Nike Shoes', 'Floral Dress')", "").lower()
-
-# Filtering Logic
-if query:
-    results = df[df['search_content'].str.contains(query, na=False)]
-else:
-    results = df.sample(100, random_state=42) # Initial random discovery
-
-# Stage 5: Visual Re-ranking Logic
-def apply_visual_reranking(candidates):
-    if not st.session_state.history:
-        return candidates.head(20)
-    
-    # Calculate User Visual Profile (Average of clicked image vectors)
-    user_vectors = [features_db[str(p)] for p in st.session_state.history if str(p) in features_db]
-    if not user_vectors:
-        return candidates.head(20)
-        
-    user_profile_vec = np.mean(user_vectors, axis=0)
-    
-    # Compute Similarity scores for candidates
-    scores = []
-    for pid in candidates['p_id'].astype(str):
-        if pid in features_db:
-            sim = 1 - cosine(user_profile_vec, features_db[pid])
-            scores.append(sim)
-        else:
-            scores.append(0.0)
-    
+    user_profile = np.mean(user_vectors, axis=0)
+    scores = [1 - cosine(user_profile, features_db[pid]) if pid in features_db else 0 for pid in candidates['p_id']]
     candidates = candidates.copy()
     candidates['visual_score'] = scores
     return candidates.sort_values(by='visual_score', ascending=False)
 
-# Get Final Display List
-final_results = apply_visual_reranking(results)
+# --- 6. VIEW DETAILS POPUP (MODAL) ---
+if st.session_state.selected_product:
+    p_info = df[df['p_id'] == st.session_state.selected_product].iloc[0]
+    with st.expander("🔍 PRODUCT DETAILS", expanded=True):
+        col1, col2 = st.columns([1, 2])
+        with col1:
+            st.image(f"images/{p_info['p_id']}.jpg", use_container_width=True)
+        with col2:
+            st.header(p_info['brand'])
+            st.subheader(p_info['name'])
+            st.markdown(f"**Price:** ${p_info['price']}")
+            st.markdown(f"**Description:** {p_info['description']}")
+            if st.button("Close Details"):
+                st.session_state.selected_product = None
+                st.rerun()
 
-# --- 7. PRODUCT GRID DISPLAY ---
-st.divider()
-st.subheader("Recommended for You")
+# --- 7. MAIN INTERFACE ---
+st.title("Fashion AI Personalization Demo")
+query = st.text_input("Search Styles:", placeholder="Enter keywords (e.g. Nike, Cotton, Dress)...").lower()
 
+filtered_data = df[df['search_meta'].str.contains(query)] if query else df.sample(100, random_state=1)
+final_results = get_recommendations(filtered_data)
+
+st.write(f"Showing results for your visual profile ({len(st.session_state.history)} interactions)")
+
+# Product Grid
 cols = st.columns(4)
 for i, (idx, row) in enumerate(final_results.head(16).iterrows()):
     with cols[i % 4]:
-        # Product Card
-        st.markdown(f'<div class="product-box">', unsafe_allow_html=True)
+        st.markdown('<div class="product-card">', unsafe_allow_html=True)
         img_path = f"images/{row['p_id']}.jpg"
-        
         if os.path.exists(img_path):
             st.image(img_path, use_container_width=True)
-        else:
-            st.warning("Image Pending...")
-            
         st.write(f"**{row['brand']}**")
-        st.caption(f"{row['name'][:35]}...")
-        st.write(f"**Price:** ${row['price']}")
+        st.write(f"Price: ${row['price']}")
         
-        if st.button("View Details", key=f"btn_{row['p_id']}"):
-            # Stage 3: Interaction Tracking
+        if st.button("View Details", key=row['p_id']):
             st.session_state.history.append(row['p_id'])
-            st.session_state.clicks += 1
-            st.toast(f"Profile updated with {row['brand']} style!")
-            time.sleep(0.5)
+            st.session_state.selected_product = row['p_id'] # Open details
+            log_interaction(row['p_id'], "view_detail")
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 8. RESEARCH FOOTER ---
-st.divider()
-st.caption("Master Thesis Research | HSE University | 2026")
+# --- 8. BI ADMIN SECTION (HIDDEN) ---
+st.sidebar.title("Admin BI Panel")
+if st.sidebar.checkbox("Show Data Logs"):
+    if os.path.exists('interaction_logs.csv'):
+        logs = pd.read_csv('interaction_logs.csv')
+        st.sidebar.write(logs)
+        st.sidebar.download_button("Download BI Data", logs.to_csv(index=False), "research_results.csv")
