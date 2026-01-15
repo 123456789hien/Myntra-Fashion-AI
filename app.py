@@ -9,173 +9,161 @@ from scipy.spatial.distance import cosine
 import datetime
 import time
 
-# --- 1. RESEARCH-GRADE UI CONFIGURATION ---
-st.set_page_config(page_title="Visual AI Retail Analytics", page_icon="🛍️", layout="wide")
+# --- 1. UI CONFIGURATION ---
+st.set_page_config(page_title="AI Fashion Marketplace", page_icon="🛍️", layout="wide")
 
-# Custom Professional Styling (Clean, Minimalist, Luxury Retail)
+# Professional E-commerce CSS
 st.markdown("""
     <style>
-    .stApp { background-color: #FFFFFF; }
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap');
+    html, body, [class*="css"] { font-family: 'Inter', sans-serif; }
+    .main { background-color: #fcfcfc; }
+    .stTextInput>div>div>input { border-radius: 25px; padding: 10px 25px; border: 1px solid #e0e0e0; }
     .product-card {
-        border: 1px solid #F0F2F6; padding: 20px; border-radius: 12px;
-        background-color: #FFFFFF; text-align: center;
-        box-shadow: 0 4px 6px rgba(0,0,0,0.02); transition: 0.3s;
+        background: white; border: 1px solid #f0f0f0; border-radius: 12px;
+        padding: 15px; text-align: center; transition: all 0.3s ease;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.02); margin-bottom: 20px;
     }
-    .product-card:hover { box-shadow: 0 10px 15px rgba(0,0,0,0.05); }
-    .filter-section { background-color: #F8F9FA; padding: 20px; border-radius: 15px; }
-    .stButton>button { border-radius: 8px; font-weight: 600; height: 45px; }
-    .cart-badge { background-color: #FF4B4B; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; }
+    .product-card:hover { transform: translateY(-5px); box-shadow: 0 12px 20px rgba(0,0,0,0.08); }
+    .price-tag { color: #ff4b4b; font-weight: 700; font-size: 18px; margin: 10px 0; }
+    .brand-tag { color: #888; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; }
+    .cart-btn { background-color: #000; color: #fff; border-radius: 8px; border: none; padding: 8px 15px; width: 100%; }
+    .filter-bar { background: #fff; padding: 20px; border-radius: 15px; border: 1px solid #f0f0f0; margin-bottom: 30px; }
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. CLOUD DATA INFRASTRUCTURE ---
+# --- 2. DATA INFRASTRUCTURE ---
 @st.cache_resource
-def initialize_system():
+def setup_system():
     files = {
-        'final_product_metadata.csv': '1eNr_tNE5bRgJEEYhRPxMl4aXwlOleC00',
-        'visual_features.pkl': '1u--yRrnWaqmfOke6xQtxXAThXXBP2MYg',
+        'metadata.csv': '1eNr_tNE5bRgJEEYhRPxMl4aXwlOleC00',
+        'features.pkl': '1u--yRrnWaqmfOke6xQtxXAThXXBP2MYg',
         'images.zip': '1mbrnVwgk5Xyrjg2tSoSbnbJqk2oinmX-'
     }
     for filename, f_id in files.items():
         if not os.path.exists(filename):
-            url = f'https://drive.google.com/uc?id={f_id}'
-            gdown.download(url, filename, quiet=False)
+            gdown.download(f'https://drive.google.com/uc?id={f_id}', filename, quiet=False)
     if not os.path.exists('images'):
-        with zipfile.ZipFile('images.zip', 'r') as zip_ref:
-            zip_ref.extractall('.')
+        with zipfile.ZipFile('images.zip', 'r') as z: z.extractall('.')
 
-initialize_system()
+setup_system()
 
-# --- 3. DATA & MODEL LOADING ---
 @st.cache_data
-def load_research_data():
-    df = pd.read_csv('final_product_metadata.csv')
+def load_data():
+    df = pd.read_csv('metadata.csv')
     df['p_id'] = df['p_id'].astype(str)
-    df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0)
-    # Metadata for Search Engine (Text-based)
-    df['search_engine'] = (df['products'].fillna('') + " " + df['brand'].fillna('') + " " + df['colour'].fillna('')).str.lower()
-    with open('visual_features.pkl', 'rb') as f:
+    df['search_engine'] = (df['products'].fillna('') + " " + df['brand'].fillna('') + " " + df['description'].fillna('')).str.lower()
+    with open('features.pkl', 'rb') as f:
         features = pickle.load(f)
     return df, {str(k): v for k, v in features.items()}
 
-df, features_db = load_research_data()
+df, features_db = load_data()
 
-# --- 4. SESSION MANAGEMENT (BI TRACKING) ---
-if 'user_id' not in st.session_state: st.session_state.user_id = f"USER_{int(time.time())}"
-if 'view_history' not in st.session_state: st.session_state.view_history = []
-if 'cart' not in st.session_state: st.session_state.cart = []
-if 'selected_product' not in st.session_state: st.session_state.selected_product = None
+# --- 3. SESSION & BI LOGGING ---
+if 'user_id' not in st.session_state: st.session_state.user_id = f"U{int(time.time())}"
+if 'history' not in st.session_state: st.session_state.history = [] # For views
+if 'cart' not in st.session_state: st.session_state.cart = [] # For high-intent
+if 'selected' not in st.session_state: st.session_state.selected = None
 
-def log_event(p_id, action):
-    log_entry = pd.DataFrame([{
-        "user_id": st.session_state.user_id,
-        "timestamp": datetime.datetime.now().isoformat(),
-        "p_id": p_id,
-        "action": action
-    }])
-    log_entry.to_csv('bi_interaction_logs.csv', mode='a', header=not os.path.exists('bi_interaction_logs.csv'), index=False)
+def log_bi_event(p_id, action):
+    log = pd.DataFrame([{"user_id": st.session_state.user_id, "time": datetime.datetime.now(), "p_id": p_id, "action": action}])
+    log.to_csv('bi_logs.csv', mode='a', header=not os.path.exists('bi_logs.csv'), index=False)
 
-# --- 5. THE HYBRID RECOMMENDATION ENGINE ---
-def hybrid_ranker(candidates):
-    # Stage 5 of Workflow: Visual Preference Re-ranking
-    if not st.session_state.view_history: return candidates.head(20)
+# --- 4. ALGORITHM: COSINE SIMILARITY RE-RANKING ---
+def apply_reranking(candidates):
+    # Combine views and cart (cart items weighted 3x)
+    interactions = st.session_state.history + (st.session_state.cart * 3)
+    if not interactions: return candidates.head(24)
     
-    # Weighting: Cart items have 3x more influence than views
-    recent_pids = st.session_state.view_history[-5:] + (st.session_state.cart * 2)
-    user_vectors = [features_db[pid] for pid in recent_pids if pid in features_db]
+    # User Visual Profile: Mean of feature vectors
+    user_vecs = [features_db[pid] for pid in interactions if pid in features_db]
+    if not user_vecs: return candidates.head(24)
     
-    if not user_vectors: return candidates.head(20)
+    profile_vec = np.mean(user_vecs, axis=0)
     
-    user_profile = np.mean(user_vectors, axis=0)
-    # Cosine Similarity calculation
-    scores = [1 - cosine(user_profile, features_db[pid]) if pid in features_db else 0 for pid in candidates['p_id']]
+    # Precise Cosine Similarity calculation
+    sims = []
+    for pid in candidates['p_id']:
+        if pid in features_db:
+            sims.append(1 - cosine(profile_vec, features_db[pid]))
+        else: sims.append(0.0)
+    
     candidates = candidates.copy()
-    candidates['visual_similarity'] = scores
-    return candidates.sort_values(by='visual_similarity', ascending=False)
+    candidates['score'] = sims
+    return candidates.sort_values(by='score', ascending=False)
 
-# --- 6. SIDEBAR: PROFESSIONAL FILTERS ---
-with st.sidebar:
-    st.title("🔍 Discovery Filters")
-    st.markdown("---")
-    
-    search_product = st.selectbox("Product Category", options=["All"] + sorted(df['products'].unique().tolist()))
-    search_brand = st.multiselect("Brand", options=sorted(df['brand'].unique().tolist()))
-    search_color = st.multiselect("Color Palette", options=sorted(df['colour'].unique().tolist()))
-    price_range = st.slider("Price Point ($)", 0, int(df['price'].max()), (0, int(df['price'].max())))
-    
-    st.markdown("---")
-    st.subheader("🛒 Your Cart")
-    st.write(f"Items in cart: {len(st.session_state.cart)}")
-    if st.button("Clear History"):
-        st.session_state.view_history = []
-        st.session_state.cart = []
-        st.rerun()
+# --- 5. HEADER & SEARCH ---
+st.title("🛍️ SMART MARKETPLACE")
+st.markdown("---")
+search_query = st.text_input("", placeholder="Search for products, brands or styles (e.g., Nike, Black Dress, Cotton)...").lower()
 
-# --- 7. PRODUCT DETAIL MODAL ---
-if st.session_state.selected_product:
-    p = df[df['p_id'] == st.session_state.selected_product].iloc[0]
-    st.markdown("---")
-    c1, c2 = st.columns([1, 1.5])
-    with c1:
-        st.image(f"images/{p['p_id']}.jpg", use_container_width=True)
-    with c2:
-        st.title(f"{p['brand']}")
-        st.subheader(p['name'])
-        st.header(f"${p['price']}")
-        st.info(f"**Specifications:** Color: {p['colour']} | Category: {p['products']}")
+# --- 6. INTEGRATED FILTER BAR ---
+with st.container():
+    st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
+    f_col1, f_col2, f_col3 = st.columns(3)
+    with f_col1:
+        selected_brands = st.multiselect("Brand", options=sorted(df['brand'].unique()))
+    with f_col2:
+        selected_colors = st.multiselect("Color", options=sorted(df['colour'].unique()))
+    with f_col3:
+        price_range = st.slider("Price Range ($)", 0, int(df['price'].max()), (0, int(df['price'].max())))
+    st.markdown('</div>', unsafe_allow_html=True)
+
+# --- 7. LOGIC: MATCH SEARCH & FILTERS ---
+mask = df['price'].between(price_range[0], price_range[1])
+if search_query: mask &= df['search_engine'].str.contains(search_query)
+if selected_brands: mask &= df['brand'].isin(selected_brands)
+if selected_colors: mask &= df['colour'].isin(selected_colors)
+
+filtered_df = df[mask]
+display_df = apply_reranking(filtered_df)
+
+# --- 8. PRODUCT DETAIL SECTION ---
+if st.session_state.selected:
+    p = df[df['p_id'] == st.session_state.selected].iloc[0]
+    st.divider()
+    d1, d2 = st.columns([1, 1.5])
+    with d1: st.image(f"images/{p['p_id']}.jpg", use_container_width=True)
+    with d2:
+        st.markdown(f"### {p['brand']}")
+        st.header(p['name'])
+        st.markdown(f"<p class='price-tag'>${p['price']}</p>", unsafe_allow_html=True)
         st.write(f"**Description:** {p['description']}")
-        
-        ca1, ca2 = st.columns(2)
-        with ca1:
-            if st.button("➕ Add to Cart", type="primary"):
+        st.write(f"**Specifications:** Color: {p['colour']} | Category: {p['products']}")
+        b1, b2 = st.columns(2)
+        with b1:
+            if st.button("🛒 ADD TO CART", type="primary"):
                 st.session_state.cart.append(p['p_id'])
-                log_event(p['p_id'], "add_to_cart")
-                st.toast("Added to Cart!")
-        with ca2:
-            if st.button("✖️ Close"):
-                st.session_state.selected_product = None
+                log_bi_event(p['p_id'], "cart_add")
+                st.toast("Item added to cart!")
+        with b2:
+            if st.button("CLOSE"):
+                st.session_state.selected = None
                 st.rerun()
-    st.markdown("---")
+    st.divider()
 
-# --- 8. MAIN DISCOVERY GRID ---
-st.title("Personalized Fashion Intelligence")
-st.caption(f"Session ID: {st.session_state.user_id} | Powered by ResNet50 & BI Analytics")
-
-# Text Search (Stage 1)
-search_text = st.text_input("Search by product name or keywords:", "").lower()
-
-# Apply Filters
-query_results = df.copy()
-if search_product != "All": query_results = query_results[query_results['products'] == search_product]
-if search_brand: query_results = query_results[query_results['brand'].isin(search_brand)]
-if search_color: query_results = query_results[query_results['colour'].isin(search_color)]
-query_results = query_results[(query_results['price'] >= price_range[0]) & (query_results['price'] <= price_range[1])]
-if search_text: query_results = query_results[query_results['search_engine'].str.contains(search_text)]
-
-# Apply Visual Re-ranking
-final_display = hybrid_ranker(query_results)
-
-# Render Grid
-st.subheader("Recommended for You")
-grid_cols = st.columns(4)
-for i, (idx, row) in enumerate(final_display.head(20).iterrows()):
-    with grid_cols[i % 4]:
-        st.markdown('<div class="product-card">', unsafe_allow_html=True)
+# --- 9. PRODUCT GRID ---
+st.subheader("Recommended Products")
+cols = st.columns(4)
+for i, (idx, row) in enumerate(display_df.head(24).iterrows()):
+    with cols[i % 4]:
+        st.markdown(f'<div class="product-card">', unsafe_allow_html=True)
         img_path = f"images/{row['p_id']}.jpg"
-        if os.path.exists(img_path):
-            st.image(img_path, use_container_width=True)
-        st.write(f"**{row['brand']}**")
-        st.caption(f"{row['products']} | ${row['price']}")
-        
-        if st.button("View Product", key=f"view_{row['p_id']}"):
-            st.session_state.view_history.append(row['p_id'])
-            st.session_state.selected_product = row['p_id']
-            log_event(row['p_id'], "view")
+        if os.path.exists(img_path): st.image(img_path, use_container_width=True)
+        st.markdown(f"<p class='brand-tag'>{row['brand']}</p>", unsafe_allow_html=True)
+        st.write(f"**{row['products']}**")
+        st.markdown(f"<p class='price-tag'>${row['price']}</p>", unsafe_allow_html=True)
+        if st.button("View Product", key=f"v_{row['p_id']}"):
+            st.session_state.history.append(row['p_id'])
+            st.session_state.selected = row['p_id']
+            log_bi_event(row['p_id'], "view")
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 9. ADMIN BI DATA EXPORT ---
-if st.sidebar.checkbox("Export BI Logs (Thesis Data)"):
-    if os.path.exists('bi_interaction_logs.csv'):
-        logs = pd.read_csv('bi_interaction_logs.csv')
-        st.sidebar.download_button("Download CSV", logs.to_csv(index=False), "user_data.csv")
+# --- 10. ADMIN DASHBOARD ---
+st.sidebar.title("BI Admin Control")
+st.sidebar.metric("User ID", st.session_state.user_id)
+st.sidebar.metric("Cart Items", len(st.session_state.cart))
+if st.sidebar.checkbox("Download Research Data"):
+    if os.path.exists('bi_logs.csv'):
+        st.sidebar.download_button("Export CSV", pd.read_csv('bi_logs.csv').to_csv(index=False), "user_data.csv")
