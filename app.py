@@ -11,9 +11,9 @@ import time
 import re
 
 # --- 1. PAGE CONFIGURATION ---
-st.set_page_config(page_title="Myntra Apparel AI | BI Research", page_icon="👗", layout="wide")
+st.set_page_config(page_title="Myntra AI | Unified Search", page_icon="👗", layout="wide")
 
-# Professional English CSS
+# Professional Styling
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -33,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA UTILITIES & SPECIFIC APPAREL CATEGORIZATION ---
+# --- 2. DATA PRE-PROCESSING ---
 def clean_description(text):
     if not isinstance(text, str): return ""
     text = text.replace('<li>', ' • ').replace('</li>', '\n')
@@ -41,18 +41,16 @@ def clean_description(text):
     return re.sub(clean_re, '', text).replace('&nbsp;', ' ').strip()
 
 def get_master_category(product_name):
-    """Specific categories mapped from Myntra Apparel Dataset."""
     name = str(product_name).lower()
-    if 'kurta' in name or 'kurtas' in name: return 'Kurta & Ethnic Wear'
+    if 'kurta' in name: return 'Kurta & Ethnic'
     if 't-shirt' in name or 'tshirt' in name: return 'T-Shirts'
     if 'shirt' in name: return 'Shirts'
     if 'dress' in name: return 'Dresses'
-    if 'top' in name: return 'Tops & Tunics'
-    if 'trousers' in name or 'pants' in name: return 'Trousers & Pants'
+    if 'top' in name: return 'Tops'
+    if 'trousers' in name or 'pants' in name: return 'Trousers'
     if 'jeans' in name: return 'Jeans'
-    if 'leggings' in name or 'churidar' in name: return 'Ethnic Bottoms'
-    if 'jacket' in name or 'blazer' in name or 'coat' in name: return 'Outerwear'
-    if 'bra' in name or 'briefs' in name or 'night' in name: return 'Lingerie & Nightwear'
+    if 'jacket' in name or 'coat' in name: return 'Outerwear'
+    if 'bra' in name or 'briefs' in name: return 'Innerwear'
     return 'Other Apparel'
 
 @st.cache_resource
@@ -76,42 +74,33 @@ def load_and_standardize_data():
     df = pd.read_csv('metadata.csv')
     df['p_id'] = df['p_id'].astype(str)
     df['description'] = df['description'].apply(clean_description)
-    
-    # Precise Categorization for Apparel
     df['master_category'] = df['products'].apply(get_master_category)
-    
     df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0)
     df['brand'] = df['brand'].fillna('Generic')
-    df['search_index'] = (df['products'] + " " + df['brand'] + " " + df['colour'].fillna('')).str.lower()
-    
+    df['colour'] = df['colour'].fillna('Multicolor')
     with open('features.pkl', 'rb') as f:
         features = pickle.load(f)
     return df, {str(k): v for k, v in features.items()}
 
 df, features_db = load_and_standardize_data()
 
-# --- 3. SESSION & LOGGING ---
+# --- 3. SESSION & BI LOGGING ---
 if 'session_id' not in st.session_state: st.session_state.session_id = f"S{int(time.time())}"
 if 'interactions' not in st.session_state: st.session_state.interactions = []
 if 'cart' not in st.session_state: st.session_state.cart = []
 if 'focus_id' not in st.session_state: st.session_state.focus_id = None
-if 'query' not in st.session_state: st.session_state.query = ""
 
 def log_event(p_id, action, score=0, rank=0):
     file_path = 'bi_research_logs.csv'
     log_entry = {
         "session_id": st.session_state.session_id,
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-        "p_id": p_id,
-        "action": action,
-        "query": st.session_state.query,
-        "similarity": round(score, 4),
-        "rank": rank
+        "p_id": p_id, "action": action, "similarity": round(score, 4), "rank": rank
     }
     log_df = pd.DataFrame([log_entry])
     log_df.to_csv(file_path, mode='a', header=not os.path.exists(file_path), index=False)
 
-# --- 4. CORE RE-RANKING ALGORITHM ---
+# --- 4. VISUAL INTELLIGENCE ALGORITHM ---
 def rank_products(candidates):
     user_history = st.session_state.interactions + (st.session_state.cart * 3)
     if not user_history: return candidates.assign(score=0.0).head(24)
@@ -123,28 +112,35 @@ def rank_products(candidates):
     candidates['score'] = scores
     return candidates.sort_values(by='score', ascending=False)
 
-# --- 5. ENHANCED FILTER INTERFACE ---
+# --- 5. UNIFIED SEARCH & FILTER INTERFACE ---
 st.title("👗 AI Fashion Research Marketplace")
-st.caption(f"BI Protocol | Currency: ₹ (INR) | Session: {st.session_state.session_id}")
+st.caption(f"BI Protocol Ready | Currency: ₹ (INR) | Session: {st.session_state.session_id}")
 
 with st.container():
     st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
-    f1, f2, f3 = st.columns([2, 1, 1])
+    f1, f2, f3, f4 = st.columns([1.5, 1, 1, 1])
+    
     with f1:
-        # Dual Search: Keyword + Master Category Selection
-        kw = st.text_input("Search Styles (e.g. 'Blue Silk', 'Cotton')", placeholder="Type here to search keywords...")
-        st.session_state.query = kw
-        selected_cats = st.multiselect("Or Filter by Categories", sorted(df['master_category'].unique()))
+        # SINGLE UNIFIED FILTER: Type to search or select from list
+        search_options = sorted(df['master_category'].unique())
+        selected_cats = st.multiselect(
+            "Search Styles & Categories", 
+            options=search_options,
+            placeholder="Search e.g. 'Shirts'"
+        )
     with f2:
-        selected_brands = st.multiselect("Brands", sorted(df['brand'].unique()))
+        # COLOUR FILTER RESTORED
+        selected_colors = st.multiselect("Filter by Colour", sorted(df['colour'].unique()))
     with f3:
+        selected_brands = st.multiselect("Filter by Brand", sorted(df['brand'].unique()))
+    with f4:
         max_p = st.slider("Max Price (₹)", 0, int(df['price'].max()), int(df['price'].max()))
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Filtering Logic
 mask = df['price'] <= max_p
-if kw: mask &= df['search_index'].str.contains(kw.lower())
 if selected_cats: mask &= df['master_category'].isin(selected_cats)
+if selected_colors: mask &= df['colour'].isin(selected_colors)
 if selected_brands: mask &= df['brand'].isin(selected_brands)
 
 final_display = rank_products(df[mask])
@@ -156,7 +152,7 @@ else:
     main_view = st.container()
 
 with main_view:
-    st.subheader("Your Personalized Recommendations")
+    st.subheader("Personalized Catalog")
     cols = 3 if st.session_state.focus_id else 4
     grid = st.columns(cols)
     
@@ -178,15 +174,15 @@ if st.session_state.focus_id:
     with side_view:
         st.markdown('<div class="side-panel">', unsafe_allow_html=True)
         item = df[df['p_id'] == st.session_state.focus_id].iloc[0]
-        if st.button("✕ Close"):
+        if st.button("✕ Close Details"):
             st.session_state.focus_id = None
             st.rerun()
         st.image(f"images/{item['p_id']}.jpg")
         st.header(item['brand'])
         st.subheader(item['products'])
         st.markdown(f"## ₹{int(item['price']):,}")
-        st.markdown("---")
-        st.write("**Description:**")
+        st.divider()
+        st.write("**Product Details:**")
         st.write(item['description'])
         if st.button("🛒 Add to Cart", type="primary"):
             st.session_state.cart.append(item['p_id'])
@@ -196,10 +192,9 @@ if st.session_state.focus_id:
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 7. LOG EXPORT ---
+# --- 7. ADMIN ---
 with st.sidebar:
-    st.title("Admin Hub")
-    if st.checkbox("Export Research Logs"):
+    st.title("Research Hub")
+    if st.checkbox("Export Data Logs"):
         if os.path.exists('bi_research_logs.csv'):
-            data = pd.read_csv('bi_research_logs.csv')
-            st.download_button("Download CSV", data.to_csv(index=False).encode('utf-8'), "bi_data.csv", "text/csv")
+            st.download_button("Download CSV", pd.read_csv('bi_research_logs.csv').to_csv(index=False), "bi_data.csv", "text/csv")
