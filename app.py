@@ -13,7 +13,7 @@ import re
 # --- 1. PAGE CONFIGURATION ---
 st.set_page_config(page_title="AI Fashion Marketplace | BI Research", page_icon="🛍️", layout="wide")
 
-# Professional E-commerce CSS
+# Professional CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -33,21 +33,32 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA UTILITIES & CLEANING ---
+# --- 2. DATA UTILITIES & SMART CATEGORIZATION ---
 def clean_description(text):
-    """Removes HTML tags and cleans up formatting for a professional look."""
     if not isinstance(text, str): return ""
-    # Convert list items to bullet points
     text = text.replace('<li>', ' • ').replace('</li>', '\n')
-    # Remove remaining HTML tags
     clean_re = re.compile('<.*?>')
-    text = re.sub(clean_re, '', text)
-    # Remove extra spaces and noise
-    return text.replace('&nbsp;', ' ').strip()
+    return re.sub(clean_re, '', text).replace('&nbsp;', ' ').strip()
+
+def get_master_category(product_name):
+    """Groups fragmented names into Broad Master Categories for better BI filtering."""
+    name = str(product_name).lower()
+    if 'shirt' in name: return 'Shirts'
+    if 't-shirt' in name or 'tshirt' in name: return 'T-Shirts'
+    if 'dress' in name: return 'Dresses'
+    if 'pant' in name or 'trouser' in name: return 'Pants & Trousers'
+    if 'shoe' in name or 'sneaker' in name or 'footwear' in name: return 'Footwear'
+    if 'kurta' in name: return 'Kurta Sets'
+    if 'saree' in name: return 'Sarees'
+    if 'bag' in name: return 'Bags & Handbags'
+    if 'watch' in name: return 'Watches'
+    if 'top' in name: return 'Tops'
+    if 'jeans' in name: return 'Jeans'
+    if 'jacket' in name or 'coat' in name: return 'Outerwear'
+    return 'Accessories & Others'
 
 @st.cache_resource
 def init_system():
-    """Downloads and extracts the dataset if not already present."""
     files = {
         'metadata.csv': '1eNr_tNE5bRgJEEYhRPxMl4aXwlOleC00',
         'features.pkl': '1u--yRrnWaqmfOke6xQtxXAThXXBP2MYg',
@@ -64,18 +75,18 @@ init_system()
 
 @st.cache_data
 def load_and_standardize_data():
-    """Loads and cleans the dataset for consistent BI analysis."""
     df = pd.read_csv('metadata.csv')
     df['p_id'] = df['p_id'].astype(str)
     
-    # Standardizing Columns
+    # 1. Clean Description
     df['description'] = df['description'].apply(clean_description)
-    df['products'] = df['products'].fillna('Other').str.strip().str.title()
+    
+    # 2. CREATE MASTER CATEGORY (This fixes your filter issue)
+    df['master_category'] = df['products'].apply(get_master_category)
+    
+    # 3. Standardize Price & Brand
     df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0)
     df['brand'] = df['brand'].fillna('Generic')
-    
-    # Metadata for fallback search
-    df['search_content'] = (df['products'] + " " + df['brand'] + " " + df['colour'].fillna('')).str.lower()
     
     with open('features.pkl', 'rb') as f:
         features = pickle.load(f)
@@ -107,16 +118,11 @@ def log_event(p_id, action, score=0, rank=0):
 
 # --- 4. VISUAL INTELLIGENCE ALGORITHM ---
 def rank_products(candidates):
-    """Ranks products based on Visual Cosine Similarity to User Profile."""
-    # User Profile = Vector Mean of Viewed (x1) + Added to Cart (x3)
     user_history = st.session_state.interactions + (st.session_state.cart * 3)
     if not user_history: return candidates.assign(score=0.0).head(24)
-    
     user_vecs = [features_db[pid] for pid in user_history if pid in features_db]
     if not user_vecs: return candidates.assign(score=0.0).head(24)
-    
     profile_vec = np.mean(user_vecs, axis=0)
-    
     scores = [1 - cosine(profile_vec, features_db[pid]) if pid in features_db else 0 for pid in candidates['p_id']]
     candidates = candidates.copy()
     candidates['score'] = scores
@@ -130,21 +136,21 @@ with st.container():
     st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
     f1, f2, f3, f4 = st.columns([1.5, 1, 1, 1])
     with f1:
-        # SEARCH BY CATEGORY (Multi-select)
-        selected_cats = st.multiselect("Select Categories", sorted(df['products'].unique()), placeholder="Type e.g. Kurta, Saree")
+        # NOW USING MASTER CATEGORIES
+        master_cats = sorted(df['master_category'].unique())
+        selected_cats = st.multiselect("Product Categories", master_cats, placeholder="Search Styles (e.g. Shirts, Footwear)")
     with f2:
         selected_brands = st.multiselect("Filter Brand", sorted(df['brand'].unique()))
     with f3:
         selected_colors = st.multiselect("Filter Color", sorted(df['colour'].unique()))
     with f4:
-        # PRICE RANGE IN RUPEES
         max_p = int(df['price'].max())
         price_limit = st.slider("Max Price (₹)", 0, max_p, max_p)
     st.markdown('</div>', unsafe_allow_html=True)
 
 # Apply Logic
 mask = df['price'] <= price_limit
-if selected_cats: mask &= df['products'].isin(selected_cats)
+if selected_cats: mask &= df['master_category'].isin(selected_cats)
 if selected_brands: mask &= df['brand'].isin(selected_brands)
 if selected_colors: mask &= df['colour'].isin(selected_colors)
 
@@ -205,7 +211,6 @@ if st.session_state.focus_id:
 # --- 7. ADMIN SIDEBAR ---
 with st.sidebar:
     st.title("Research Hub")
-    st.write(f"Logged Interactions: {len(st.session_state.interactions)}")
     if st.checkbox("Download Data Logs"):
         if os.path.exists('bi_research_logs.csv'):
             data = pd.read_csv('bi_research_logs.csv', on_bad_lines='skip')
