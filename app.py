@@ -11,9 +11,9 @@ import time
 import re
 
 # --- 1. PAGE CONFIGURATION ---
-st.set_page_config(page_title="AI Fashion Marketplace | BI Research", page_icon="🛍️", layout="wide")
+st.set_page_config(page_title="Myntra Apparel AI | BI Research", page_icon="👗", layout="wide")
 
-# Professional CSS
+# Professional English CSS
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
@@ -33,7 +33,7 @@ st.markdown("""
     </style>
     """, unsafe_allow_html=True)
 
-# --- 2. DATA UTILITIES & SMART CATEGORIZATION ---
+# --- 2. DATA UTILITIES & SPECIFIC APPAREL CATEGORIZATION ---
 def clean_description(text):
     if not isinstance(text, str): return ""
     text = text.replace('<li>', ' • ').replace('</li>', '\n')
@@ -41,21 +41,19 @@ def clean_description(text):
     return re.sub(clean_re, '', text).replace('&nbsp;', ' ').strip()
 
 def get_master_category(product_name):
-    """Groups fragmented names into Broad Master Categories for better BI filtering."""
+    """Specific categories mapped from Myntra Apparel Dataset."""
     name = str(product_name).lower()
-    if 'shirt' in name: return 'Shirts'
+    if 'kurta' in name or 'kurtas' in name: return 'Kurta & Ethnic Wear'
     if 't-shirt' in name or 'tshirt' in name: return 'T-Shirts'
+    if 'shirt' in name: return 'Shirts'
     if 'dress' in name: return 'Dresses'
-    if 'pant' in name or 'trouser' in name: return 'Pants & Trousers'
-    if 'shoe' in name or 'sneaker' in name or 'footwear' in name: return 'Footwear'
-    if 'kurta' in name: return 'Kurta Sets'
-    if 'saree' in name: return 'Sarees'
-    if 'bag' in name: return 'Bags & Handbags'
-    if 'watch' in name: return 'Watches'
-    if 'top' in name: return 'Tops'
+    if 'top' in name: return 'Tops & Tunics'
+    if 'trousers' in name or 'pants' in name: return 'Trousers & Pants'
     if 'jeans' in name: return 'Jeans'
-    if 'jacket' in name or 'coat' in name: return 'Outerwear'
-    return 'Accessories & Others'
+    if 'leggings' in name or 'churidar' in name: return 'Ethnic Bottoms'
+    if 'jacket' in name or 'blazer' in name or 'coat' in name: return 'Outerwear'
+    if 'bra' in name or 'briefs' in name or 'night' in name: return 'Lingerie & Nightwear'
+    return 'Other Apparel'
 
 @st.cache_resource
 def init_system():
@@ -77,16 +75,14 @@ init_system()
 def load_and_standardize_data():
     df = pd.read_csv('metadata.csv')
     df['p_id'] = df['p_id'].astype(str)
-    
-    # 1. Clean Description
     df['description'] = df['description'].apply(clean_description)
     
-    # 2. CREATE MASTER CATEGORY (This fixes your filter issue)
+    # Precise Categorization for Apparel
     df['master_category'] = df['products'].apply(get_master_category)
     
-    # 3. Standardize Price & Brand
     df['price'] = pd.to_numeric(df['price'], errors='coerce').fillna(0)
     df['brand'] = df['brand'].fillna('Generic')
+    df['search_index'] = (df['products'] + " " + df['brand'] + " " + df['colour'].fillna('')).str.lower()
     
     with open('features.pkl', 'rb') as f:
         features = pickle.load(f)
@@ -94,11 +90,12 @@ def load_and_standardize_data():
 
 df, features_db = load_and_standardize_data()
 
-# --- 3. SESSION & BI LOGGING ---
+# --- 3. SESSION & LOGGING ---
 if 'session_id' not in st.session_state: st.session_state.session_id = f"S{int(time.time())}"
 if 'interactions' not in st.session_state: st.session_state.interactions = []
 if 'cart' not in st.session_state: st.session_state.cart = []
 if 'focus_id' not in st.session_state: st.session_state.focus_id = None
+if 'query' not in st.session_state: st.session_state.query = ""
 
 def log_event(p_id, action, score=0, rank=0):
     file_path = 'bi_research_logs.csv'
@@ -107,16 +104,14 @@ def log_event(p_id, action, score=0, rank=0):
         "timestamp": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "p_id": p_id,
         "action": action,
+        "query": st.session_state.query,
         "similarity": round(score, 4),
         "rank": rank
     }
     log_df = pd.DataFrame([log_entry])
-    if not os.path.exists(file_path):
-        log_df.to_csv(file_path, index=False)
-    else:
-        log_df.to_csv(file_path, mode='a', header=False, index=False)
+    log_df.to_csv(file_path, mode='a', header=not os.path.exists(file_path), index=False)
 
-# --- 4. VISUAL INTELLIGENCE ALGORITHM ---
+# --- 4. CORE RE-RANKING ALGORITHM ---
 def rank_products(candidates):
     user_history = st.session_state.interactions + (st.session_state.cart * 3)
     if not user_history: return candidates.assign(score=0.0).head(24)
@@ -128,54 +123,51 @@ def rank_products(candidates):
     candidates['score'] = scores
     return candidates.sort_values(by='score', ascending=False)
 
-# --- 5. TOP FILTER INTERFACE ---
-st.title("🇮🇳 AI-Driven Fashion Intelligence")
-st.caption(f"BI Protocol Ready | Currency: INR (₹) | Session: {st.session_state.session_id}")
+# --- 5. ENHANCED FILTER INTERFACE ---
+st.title("👗 AI Fashion Research Marketplace")
+st.caption(f"BI Protocol | Currency: ₹ (INR) | Session: {st.session_state.session_id}")
 
 with st.container():
     st.markdown('<div class="filter-bar">', unsafe_allow_html=True)
-    f1, f2, f3, f4 = st.columns([1.5, 1, 1, 1])
+    f1, f2, f3 = st.columns([2, 1, 1])
     with f1:
-        # NOW USING MASTER CATEGORIES
-        master_cats = sorted(df['master_category'].unique())
-        selected_cats = st.multiselect("Product Categories", master_cats, placeholder="Search Styles (e.g. Shirts, Footwear)")
+        # Dual Search: Keyword + Master Category Selection
+        kw = st.text_input("Search Styles (e.g. 'Blue Silk', 'Cotton')", placeholder="Type here to search keywords...")
+        st.session_state.query = kw
+        selected_cats = st.multiselect("Or Filter by Categories", sorted(df['master_category'].unique()))
     with f2:
-        selected_brands = st.multiselect("Filter Brand", sorted(df['brand'].unique()))
+        selected_brands = st.multiselect("Brands", sorted(df['brand'].unique()))
     with f3:
-        selected_colors = st.multiselect("Filter Color", sorted(df['colour'].unique()))
-    with f4:
-        max_p = int(df['price'].max())
-        price_limit = st.slider("Max Price (₹)", 0, max_p, max_p)
+        max_p = st.slider("Max Price (₹)", 0, int(df['price'].max()), int(df['price'].max()))
     st.markdown('</div>', unsafe_allow_html=True)
 
-# Apply Logic
-mask = df['price'] <= price_limit
+# Filtering Logic
+mask = df['price'] <= max_p
+if kw: mask &= df['search_index'].str.contains(kw.lower())
 if selected_cats: mask &= df['master_category'].isin(selected_cats)
 if selected_brands: mask &= df['brand'].isin(selected_brands)
-if selected_colors: mask &= df['colour'].isin(selected_colors)
 
 final_display = rank_products(df[mask])
 
-# --- 6. DUAL-PANEL DISPLAY ---
+# --- 6. DUAL-PANEL UX ---
 if st.session_state.focus_id:
-    main_panel, side_panel = st.columns([0.65, 0.35])
+    main_view, side_view = st.columns([0.65, 0.35])
 else:
-    main_panel = st.container()
+    main_view = st.container()
 
-with main_panel:
-    st.subheader("Personalized Catalog")
-    cols_count = 3 if st.session_state.focus_id else 4
-    grid = st.columns(cols_count)
+with main_view:
+    st.subheader("Your Personalized Recommendations")
+    cols = 3 if st.session_state.focus_id else 4
+    grid = st.columns(cols)
     
     for i, (idx, row) in enumerate(final_display.head(24).iterrows()):
-        with grid[i % cols_count]:
-            st.markdown(f'<div class="product-card">', unsafe_allow_html=True)
-            img_path = f"images/{row['p_id']}.jpg"
-            if os.path.exists(img_path):
-                st.image(img_path, use_container_width=True)
+        with grid[i % cols]:
+            st.markdown('<div class="product-card">', unsafe_allow_html=True)
+            if os.path.exists(f"images/{row['p_id']}.jpg"):
+                st.image(f"images/{row['p_id']}.jpg", use_container_width=True)
             st.markdown(f"**{row['brand']}**")
             st.markdown(f"<p class='price-text'>₹{int(row['price']):,}</p>", unsafe_allow_html=True)
-            if st.button("View Product", key=f"btn_{row['p_id']}"):
+            if st.button("Explore", key=f"v_{row['p_id']}"):
                 st.session_state.focus_id = row['p_id']
                 st.session_state.interactions.append(row['p_id'])
                 log_event(row['p_id'], "view", row['score'], i+1)
@@ -183,35 +175,31 @@ with main_panel:
             st.markdown('</div>', unsafe_allow_html=True)
 
 if st.session_state.focus_id:
-    with side_panel:
+    with side_view:
         st.markdown('<div class="side-panel">', unsafe_allow_html=True)
         item = df[df['p_id'] == st.session_state.focus_id].iloc[0]
-        
-        if st.button("✕ Close Details"):
+        if st.button("✕ Close"):
             st.session_state.focus_id = None
             st.rerun()
-            
-        st.image(f"images/{item['p_id']}.jpg", use_container_width=True)
+        st.image(f"images/{item['p_id']}.jpg")
         st.header(item['brand'])
         st.subheader(item['products'])
         st.markdown(f"## ₹{int(item['price']):,}")
-        st.divider()
-        st.markdown("**Product Description:**")
+        st.markdown("---")
+        st.write("**Description:**")
         st.write(item['description'])
-        st.info(f"Color: {item['colour']}")
-        
         if st.button("🛒 Add to Cart", type="primary"):
             st.session_state.cart.append(item['p_id'])
             log_event(item['p_id'], "add_to_cart")
-            st.toast("Updated Profile! Recommendation re-ranked.")
+            st.toast("Profile Updated!")
             time.sleep(0.5)
             st.rerun()
         st.markdown('</div>', unsafe_allow_html=True)
 
-# --- 7. ADMIN SIDEBAR ---
+# --- 7. LOG EXPORT ---
 with st.sidebar:
-    st.title("Research Hub")
-    if st.checkbox("Download Data Logs"):
+    st.title("Admin Hub")
+    if st.checkbox("Export Research Logs"):
         if os.path.exists('bi_research_logs.csv'):
-            data = pd.read_csv('bi_research_logs.csv', on_bad_lines='skip')
-            st.download_button("Download CSV", data.to_csv(index=False).encode('utf-8'), "research_data.csv", "text/csv")
+            data = pd.read_csv('bi_research_logs.csv')
+            st.download_button("Download CSV", data.to_csv(index=False).encode('utf-8'), "bi_data.csv", "text/csv")
